@@ -48,12 +48,17 @@ const CLASS_COLORS = {
 const UNIT_COLORS = {
   SX: { solid: "#2563EB", grad: "linear-gradient(135deg, #1D4ED8, #38BDF8)" },
   NEURO: { solid: "#D97706", grad: "linear-gradient(135deg, #B45309, #FBBF24)" },
-  NEURO_SX: { solid: "#7E22CE", grad: "linear-gradient(135deg, #6B21A8, #D8B4FE)" },
+  ALL: { solid: "#0A7A76", grad: "linear-gradient(160deg, #0A7A76 0%, #0EA5A0 48%, #38BDF8 100%)" },
+};
+const POSTER_GRADS = {
+  SX: "linear-gradient(160deg, #1E40AF 0%, #2563EB 50%, #38BDF8 100%)",
+  NEURO: "linear-gradient(160deg, #B45309 0%, #EA580C 50%, #F59E0B 100%)",
+  ALL: "linear-gradient(160deg, #0A7A76 0%, #0EA5A0 48%, #38BDF8 100%)",
 };
 const ICONS = { plus: "＋", dash: "▦", form: "🗒", month: "📋", summary: "📊", trash: "🗑", lock: "🔒",
   login: "→", logout: "⎋", copy: "⧉", check: "✓", refresh: "↻", users: "👥", close: "✕", download: "⬇" };
 
-const UNITS = [{ key: "SX", label: "ICU-Sx" }, { key: "NEURO", label: "ICU-Neuro" }, { key: "NEURO_SX", label: "Neuro Sx" }];
+const UNITS = [{ key: "SX", label: "ICU-Sx" }, { key: "NEURO", label: "ICU-Neuro" }];
 const SPECIMENS = ["Sputum C/S", "H/C", "U/C", "CSF C/S", "Pus C/S", "Tip C/S", "อื่นๆ"];
 const CLASS_TYPES = [
   { key: "VAP", label: "VAP", full: "ปอดอักเสบจากเครื่องช่วยหายใจ" },
@@ -356,8 +361,8 @@ function SummaryRow(props) {
 }
 
 function SummaryPoster(props) {
-  const { innerRef, unitLabel, month, blocks, patientDays, discharged } = props;
-  return h("div", { ref: innerRef, style: { background: "linear-gradient(160deg, #0A7A76 0%, #0EA5A0 48%, #38BDF8 100%)", borderRadius: 22, padding: "26px 20px 22px", color: "#fff", fontFamily: "'Sarabun', sans-serif" } },
+  const { innerRef, unitLabel, month, blocks, patientDays, discharged, grad } = props;
+  return h("div", { ref: innerRef, style: { background: grad, borderRadius: 22, padding: "26px 20px 22px", color: "#fff", fontFamily: "'Sarabun', sans-serif" } },
     h("div", { style: { textAlign: "center", marginBottom: 18 } },
       h("div", { style: { fontSize: 11, letterSpacing: 2, opacity: 0.85, fontWeight: 700 } }, "IC SURVEILLANCE"),
       h("div", { style: { fontSize: 21, fontWeight: 700, marginTop: 4 } }, `สรุปเดือน ${thaiMonthShort(month)}`),
@@ -387,11 +392,13 @@ function SummaryPoster(props) {
 
 function SummaryView(props) {
   const { unit, setUnit, month, setMonth, summaryFor } = props;
+  const [scope, setScope] = useState(unit);
+  useEffect(() => { setScope(unit); }, [unit]);
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
   const posterRef = useRef(null);
-  const s = summaryFor(unit, month);
-  const unitLabel = (UNITS.find((u) => u.key === unit) || {}).label || unit;
+  const s = summaryFor(scope, month);
+  const unitLabel = scope === "ALL" ? "รวม ICU-Sx + ICU-Neuro" : ((UNITS.find((u) => u.key === scope) || {}).label || scope);
   const fmtRate = (r) => (r == null ? "ไม่สามารถคำนวณได้ (ยังไม่มีข้อมูล device-days)" : `${r.toFixed(2)} ครั้ง/1,000 device-days`);
 
   const blocks = [
@@ -436,7 +443,7 @@ function SummaryView(props) {
       h("div", { style: { height: 1, background: T.line, margin: "10px 0" } })
     ),
     h("div", { className: "no-print" }, h(Row2, null,
-      h("select", { value: unit, onChange: (e) => setUnit(e.target.value), style: inputStyle }, UNITS.map((u) => h("option", { key: u.key, value: u.key }, u.label))),
+      h("select", { value: scope, onChange: (e) => { setScope(e.target.value); if (e.target.value !== "ALL") setUnit(e.target.value); }, style: inputStyle }, UNITS.map((u) => h("option", { key: u.key, value: u.key }, u.label)).concat([h("option", { key: "ALL", value: "ALL" }, "รวม ICU-Sx + ICU-Neuro")])),
       h("input", { type: "month", value: month, onChange: (e) => setMonth(e.target.value), style: inputStyle })
     )),
     h(Card, { title: `สรุปรายเดือน — ${unitLabel}` },
@@ -452,7 +459,7 @@ function SummaryView(props) {
       h(SummaryRow, { classKey: "EXTRAVASATION", label: "Extravasation", count: s.extravasationCount, days: null, personCount: null, rate: null })
     ),
     h(Card, { title: "โปสเตอร์สรุป — สำหรับแชร์ไลน์" },
-      h(SummaryPoster, { innerRef: posterRef, unitLabel, month, blocks, patientDays: s.patientDays, discharged: s.discharged }),
+      h(SummaryPoster, { innerRef: posterRef, unitLabel, month, blocks, patientDays: s.patientDays, discharged: s.discharged, grad: POSTER_GRADS[scope] }),
       h("div", { className: "no-print", style: { display: "flex", gap: 8, marginTop: 10 } },
         h("button", { onClick: exportImage, disabled: exporting, style: { ...btnStyle("primary"), opacity: exporting ? 0.7 : 1 } }, exporting ? "กำลังสร้างรูป..." : `${ICONS.download} บันทึกเป็นรูปภาพ`)
       )
@@ -576,7 +583,7 @@ function App() {
     CLASS_TYPES.map((t) => ({ name: t.label, key: t.key, count: currentUnitCases.filter((c) => c.classification === t.key).length })),
     [currentUnitCases]);
 
-  const summaryFor = (u, m) => {
+  const baseSummary = (u, m) => {
     const d = deviceData.find((x) => x.unit === u && x.month === m) || emptyMonthlyDevice(u, m);
     const rate = (count, days) => (days > 0 ? (count / days) * 1000 : null);
     const vapCount = classCount(u, m, "VAP"), clabsiCount = classCount(u, m, "CLABSI"), cautiCount = classCount(u, m, "CAUTI");
@@ -591,6 +598,16 @@ function App() {
       fluidCount, fluidDays, phlebitisCount: num(d.phlebitisCount), extravasationCount: num(d.extravasationCount) };
   };
 
+  const summaryFor = (u, m) => {
+    if (u !== "ALL") return baseSummary(u, m);
+    const a = baseSummary("SX", m), b = baseSummary("NEURO", m);
+    const rate = (count, days) => (days > 0 ? (count / days) * 1000 : null);
+    const r = { unit: "ALL", month: m };
+    ["patientDays", "discharged", "vapCount", "ventDays", "ventCount", "clabsiCount", "cvcDays", "cvcCount", "cautiCount", "foleyDays", "foleyCount", "fluidCount", "fluidDays", "phlebitisCount", "extravasationCount"].forEach((k) => { r[k] = a[k] + b[k]; });
+    r.vapRate = rate(r.vapCount, r.ventDays); r.clabsiRate = rate(r.clabsiCount, r.cvcDays); r.cautiRate = rate(r.cautiCount, r.foleyDays);
+    return r;
+  };
+
   return h("div", { style: { fontFamily: "'Sarabun', sans-serif", background: T.bg, minHeight: "100vh", color: T.ink, paddingBottom: 88 } },
     h("header", { className: "no-print", style: { background: UNIT_COLORS[unit] && UNIT_COLORS[unit].grad, color: "#fff", padding: "18px 16px 14px" } },
       h("div", { style: { display: "flex", alignItems: "center", justifyContent: "space-between" } },
@@ -602,7 +619,7 @@ function App() {
           `${icMode ? ICONS.logout : ICONS.lock} ${icMode ? "ทีม IC" : "เข้าสู่ระบบทีม IC"}`)
       ),
       h("div", { style: { display: "flex", gap: 6, marginTop: 14 } },
-        UNITS.map((u) => h("button", { key: u.key, onClick: () => setUnit(u.key), style: { flex: 1, padding: "8px 4px", borderRadius: 10, border: "none", cursor: "pointer", background: unit === u.key ? "#fff" : "rgba(255,255,255,0.18)", color: unit === u.key ? UNIT_COLORS[u.key].solid : "#fff", fontWeight: 700, fontSize: 11.5 } }, u.label))
+        UNITS.map((u) => h("button", { key: u.key, onClick: () => setUnit(u.key), style: { flex: 1, padding: "8px 6px", borderRadius: 10, border: "none", cursor: "pointer", background: unit === u.key ? "#fff" : "rgba(255,255,255,0.18)", color: unit === u.key ? UNIT_COLORS[u.key].solid : "#fff", fontWeight: 700, fontSize: 12.5 } }, u.label))
       )
     ),
     h("main", { style: { padding: 14, maxWidth: 640, margin: "0 auto" } },
