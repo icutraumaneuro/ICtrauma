@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" />
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Sarabun', sans-serif; background: #F5F7FF; }
@@ -47,11 +48,12 @@ const CLASS_COLORS = {
 const UNIT_COLORS = {
   SX: { solid: "#2563EB", grad: "linear-gradient(135deg, #1D4ED8, #38BDF8)" },
   NEURO: { solid: "#D97706", grad: "linear-gradient(135deg, #B45309, #FBBF24)" },
+  NEURO_SX: { solid: "#7E22CE", grad: "linear-gradient(135deg, #6B21A8, #D8B4FE)" },
 };
 const ICONS = { plus: "＋", dash: "▦", form: "🗒", month: "📋", summary: "📊", trash: "🗑", lock: "🔒",
   login: "→", logout: "⎋", copy: "⧉", check: "✓", refresh: "↻", users: "👥", close: "✕", download: "⬇" };
 
-const UNITS = [{ key: "SX", label: "ICU-Sx" }, { key: "NEURO", label: "ICU-Neuro" }];
+const UNITS = [{ key: "SX", label: "ICU-Sx" }, { key: "NEURO", label: "ICU-Neuro" }, { key: "NEURO_SX", label: "Neuro Sx" }];
 const SPECIMENS = ["Sputum C/S", "H/C", "U/C", "CSF C/S", "Pus C/S", "Tip C/S", "อื่นๆ"];
 const CLASS_TYPES = [
   { key: "VAP", label: "VAP", full: "ปอดอักเสบจากเครื่องช่วยหายใจ" },
@@ -61,12 +63,19 @@ const CLASS_TYPES = [
   { key: "OTHER", label: "อื่นๆ", full: "ยังไม่จัดประเภท / เฝ้าระวัง" },
 ];
 const PREFIXES = { "นาย": "นาย", "นาง": "นาง", "นางสาว": "นส.", "เด็กชาย": "ด.ช.", "เด็กหญิง": "ด.ญ." };
-const DEVICE_FIELDS = [{ key: "vent", label: "ใช้เครื่องช่วยหายใจ" }, { key: "foley", label: "คาสายสวนปัสสาวะ" }, { key: "cvc", label: "On CVC" }];
+const DEVICE_FIELDS = [{ key: "vent", label: "ใช้เครื่องช่วยหายใจ" }, { key: "foley", label: "คาสายสวนปัสสาวะ" }, { key: "cvc", label: "On CVC" }, { key: "fluid", label: "ได้รับสารน้ำ" }];
 
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const thisMonthISO = () => new Date().toISOString().slice(0, 7);
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+const THAI_MONTHS_SHORT = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+function thaiMonthShort(month) {
+  const [y, m] = String(month).split("-").map(Number);
+  if (!y || !m) return month;
+  const by = y + 543;
+  return `${THAI_MONTHS_SHORT[m - 1] || ""}${String(by).slice(-2)}`;
+}
 
 function maskFirstName(name) { if (!name) return ""; const keep = name.length <= 3 ? 1 : Math.ceil(name.length * 0.6); return name.slice(0, keep) + "***"; }
 function maskLastName(name) { if (!name) return ""; const keep = Math.min(2, name.length); return name.slice(0, keep) + "**"; }
@@ -82,7 +91,8 @@ function emptyMonthlyDevice(unit, month) {
     vent: { lt7: emptyDeviceRow(), gt7: emptyDeviceRow() },
     foley: { lt7: emptyDeviceRow(), gt7: emptyDeviceRow() },
     cvc: { lt7: emptyDeviceRow(), gt7: emptyDeviceRow() },
-    fluid: emptyDeviceRow(), phlebitisCount: "", extravasationCount: "", recordedBy: "" };
+    fluid: { lt7: emptyDeviceRow(), gt7: emptyDeviceRow() },
+    phlebitisCount: "", extravasationCount: "", recordedBy: "" };
 }
 function emptyCaseForm(unit) {
   return { id: null, unit, bed: "", prefix: "นางสาว", firstName: "", lastName: "", originalMaskedName: "",
@@ -100,7 +110,8 @@ function flattenDevice(f) {
     foleyGt7Count: num(f.foley.gt7.count), foleyGt7Days: num(f.foley.gt7.days),
     cvcLt7Count: num(f.cvc.lt7.count), cvcLt7Days: num(f.cvc.lt7.days),
     cvcGt7Count: num(f.cvc.gt7.count), cvcGt7Days: num(f.cvc.gt7.days),
-    fluidCount: num(f.fluid.count), fluidDays: num(f.fluid.days),
+    fluidLt7Count: num(f.fluid.lt7.count), fluidLt7Days: num(f.fluid.lt7.days),
+    fluidGt7Count: num(f.fluid.gt7.count), fluidGt7Days: num(f.fluid.gt7.days),
     phlebitisCount: num(f.phlebitisCount), extravasationCount: num(f.extravasationCount),
     recordedBy: f.recordedBy || "",
   };
@@ -111,7 +122,7 @@ function unflattenDevice(row) {
     vent: { lt7: { count: row.ventLt7Count, days: row.ventLt7Days }, gt7: { count: row.ventGt7Count, days: row.ventGt7Days } },
     foley: { lt7: { count: row.foleyLt7Count, days: row.foleyLt7Days }, gt7: { count: row.foleyGt7Count, days: row.foleyGt7Days } },
     cvc: { lt7: { count: row.cvcLt7Count, days: row.cvcLt7Days }, gt7: { count: row.cvcGt7Count, days: row.cvcGt7Days } },
-    fluid: { count: row.fluidCount, days: row.fluidDays },
+    fluid: { lt7: { count: row.fluidLt7Count, days: row.fluidLt7Days }, gt7: { count: row.fluidGt7Count, days: row.fluidGt7Days } },
     phlebitisCount: row.phlebitisCount, extravasationCount: row.extravasationCount, recordedBy: row.recordedBy };
 }
 const deviceTotalDays = (row) => num(row && row.lt7 && row.lt7.days) + num(row && row.gt7 && row.gt7.days);
@@ -320,13 +331,6 @@ function DeviceFormView(props) {
       ),
       h("div", { style: { marginTop: 14 } },
         DEVICE_FIELDS.map((f) => h(DeviceRowInputs, { key: f.key, label: f.label, value: form[f.key], onChange: (v) => set(f.key, v) })),
-        h("div", { style: { marginBottom: 10 } },
-          h("div", { style: { fontSize: 12.5, fontWeight: 600, marginBottom: 6 } }, "ได้รับสารน้ำ"),
-          h("div", { style: { display: "flex", gap: 6 } },
-            h("input", { type: "number", min: "0", value: form.fluid.count, onChange: (e) => set("fluid", { ...form.fluid, count: e.target.value }), style: inputStyle, placeholder: "คน" }),
-            h("input", { type: "number", min: "0", value: form.fluid.days, onChange: (e) => set("fluid", { ...form.fluid, days: e.target.value }), style: inputStyle, placeholder: "วัน" })
-          )
-        ),
         h("div", { style: { background: T.goldSoft, borderRadius: 10, padding: 10, marginTop: 4 } },
           h(Row2, null,
             h(Field, { label: "Phlebitis (ราย)" }, h("input", { type: "number", min: "0", value: form.phlebitisCount, onChange: (e) => set("phlebitisCount", e.target.value), style: inputStyle })),
@@ -351,23 +355,80 @@ function SummaryRow(props) {
   );
 }
 
+function SummaryPoster(props) {
+  const { innerRef, unitLabel, month, blocks, patientDays, discharged } = props;
+  return h("div", { ref: innerRef, style: { background: "linear-gradient(160deg, #0A7A76 0%, #0EA5A0 48%, #38BDF8 100%)", borderRadius: 22, padding: "26px 20px 22px", color: "#fff", fontFamily: "'Sarabun', sans-serif" } },
+    h("div", { style: { textAlign: "center", marginBottom: 18 } },
+      h("div", { style: { fontSize: 11, letterSpacing: 2, opacity: 0.85, fontWeight: 700 } }, "IC SURVEILLANCE"),
+      h("div", { style: { fontSize: 21, fontWeight: 700, marginTop: 4 } }, `สรุปเดือน ${thaiMonthShort(month)}`),
+      h("div", { style: { fontSize: 13.5, opacity: 0.92, marginTop: 2, fontWeight: 600 } }, unitLabel),
+      h("div", { style: { display: "flex", justifyContent: "center", gap: 18, marginTop: 10, fontSize: 11.5, opacity: 0.92 } },
+        h("div", null, `วันนอนรวม ${patientDays} วัน`),
+        h("div", null, `จำหน่าย ${discharged} คน`)
+      )
+    ),
+    h("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
+      blocks.map((b) => h("div", { key: b.key, style: { background: "rgba(255,255,255,0.16)", borderRadius: 14, padding: "12px 14px" } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 } },
+          h("div", { style: { fontWeight: 700, fontSize: 13.5 } }, `จำนวนผู้ป่วย ${b.title}`),
+          h("div", { style: { fontSize: 19, fontWeight: 700, fontFamily: T.mono, whiteSpace: "nowrap" } }, `${b.count} ราย`)
+        ),
+        b.subs.length ? h("div", { style: { marginTop: 8, display: "flex", flexDirection: "column", gap: 4, borderTop: "1px solid rgba(255,255,255,0.3)", paddingTop: 8 } },
+          b.subs.map((sub, i) => h("div", { key: i, style: { display: "flex", justifyContent: "space-between", fontSize: 12, opacity: 0.96, gap: 8 } },
+            h("div", null, `* ${sub.label}`),
+            h("div", { style: { fontFamily: T.mono, fontWeight: 600, whiteSpace: "nowrap" } }, `${sub.days} วัน ${sub.count2} คน`)
+          ))
+        ) : null
+      ))
+    ),
+    h("div", { style: { textAlign: "center", marginTop: 16, fontSize: 10, opacity: 0.8 } }, `ICU Trauma · พิมพ์เมื่อ ${new Date().toLocaleDateString("th-TH")}`)
+  );
+}
+
 function SummaryView(props) {
   const { unit, setUnit, month, setMonth, summaryFor } = props;
   const [copied, setCopied] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const posterRef = useRef(null);
   const s = summaryFor(unit, month);
   const unitLabel = (UNITS.find((u) => u.key === unit) || {}).label || unit;
   const fmtRate = (r) => (r == null ? "ไม่สามารถคำนวณได้ (ยังไม่มีข้อมูล device-days)" : `${r.toFixed(2)} ครั้ง/1,000 device-days`);
+
+  const blocks = [
+    { key: "VAP", title: "VAP", count: s.vapCount, subs: [{ label: "จำนวนวันใช้เครื่องช่วยหายใจ", days: s.ventDays, count2: s.ventCount }] },
+    { key: "CLABSI", title: "CLABSI", count: s.clabsiCount, subs: [{ label: "จำนวนวัน On CVC", days: s.cvcDays, count2: s.cvcCount }] },
+    { key: "CAUTI", title: "CAUTI", count: s.cautiCount, subs: [
+        { label: "จำนวนวันคาสายสวนปัสสาวะ", days: s.foleyDays, count2: s.foleyCount },
+        { label: "จำนวนวันที่ได้รับสารน้ำ", days: s.fluidDays, count2: s.fluidCount },
+      ] },
+    { key: "PHLEBITIS", title: "หลอดเลือดดำอักเสบ", count: s.phlebitisCount, subs: [] },
+    { key: "EXTRAVASATION", title: "สารน้ำรั่วออกนอกหลอดเลือด", count: s.extravasationCount, subs: [] },
+  ];
+
   const summaryText = [
-    `รายงานสรุป IC ประจำเดือน ${month} — ${unitLabel}`, ``,
-    `[ข้อมูลพื้นฐาน]`, `วันนอนรวม: ${s.patientDays} วัน`, `จำหน่าย: ${s.discharged} คน`, ``,
-    `[การติดเชื้อที่สัมพันธ์กับอุปกรณ์]`,
-    `VAP: ${s.vapCount} ราย (ใช้เครื่องช่วยหายใจ ${s.ventDays} วัน / ${s.ventCount} คน) — อัตรา ${fmtRate(s.vapRate)}`,
-    `CLABSI: ${s.clabsiCount} ราย (On CVC ${s.cvcDays} วัน / ${s.cvcCount} คน) — อัตรา ${fmtRate(s.clabsiRate)}`,
-    `CAUTI: ${s.cautiCount} ราย (คาสายสวนปัสสาวะ ${s.foleyDays} วัน / ${s.foleyCount} คน) — อัตรา ${fmtRate(s.cautiRate)}`, ``,
-    `[ภาวะแทรกซ้อนจากสารน้ำ/IV]`, `ได้รับสารน้ำ: ${s.fluidDays} วัน / ${s.fluidCount} คน`,
-    `Phlebitis: ${s.phlebitisCount} ราย`, `Extravasation: ${s.extravasationCount} ราย`,
-  ].join("\n");
+    `สรุปเดือน ${thaiMonthShort(month)} — ${unitLabel}`,
+    `วันนอนรวม ${s.patientDays} วัน · จำหน่าย ${s.discharged} คน`, ``,
+    ...blocks.flatMap((b) => [
+      `-จำนวนผู้ป่วย ${b.title} ${b.count} ราย`,
+      ...b.subs.flatMap((sub) => [` *${sub.label}`, `   ${sub.days} วัน ${sub.count2} คน`]),
+      ``,
+    ]),
+  ].join("\n").trim();
+
   const copy = async () => { try { await navigator.clipboard.writeText(summaryText); setCopied(true); setTimeout(() => setCopied(false), 1800); } catch (e) {} };
+  const exportImage = async () => {
+    if (!window.html2canvas || !posterRef.current || exporting) return;
+    setExporting(true);
+    try {
+      const canvas = await window.html2canvas(posterRef.current, { scale: 2, backgroundColor: null });
+      const link = document.createElement("a");
+      link.download = `IC-สรุป-${unitLabel}-${month}.png`;
+      link.href = canvas.toDataURL("image/png");
+      link.click();
+    } catch (e) {}
+    finally { setExporting(false); }
+  };
+
   return h("div", { style: { display: "flex", flexDirection: "column", gap: 14 } },
     h("div", { className: "print-title", style: { marginBottom: 4 } },
       h("div", { style: { fontSize: 18, fontWeight: 700 } }, `รายงาน IC ประจำเดือน — ${unitLabel}`),
@@ -390,11 +451,17 @@ function SummaryView(props) {
       h(SummaryRow, { classKey: "PHLEBITIS", label: "Phlebitis", count: s.phlebitisCount, days: null, personCount: null, rate: null }),
       h(SummaryRow, { classKey: "EXTRAVASATION", label: "Extravasation", count: s.extravasationCount, days: null, personCount: null, rate: null })
     ),
-    h(Card, { title: "สรุปแบบอ่านง่าย (แยกเป็นส่วนๆ)" },
-      h("pre", { style: { whiteSpace: "pre-wrap", fontFamily: "'Sarabun', sans-serif", fontSize: 12.5, background: T.bg, borderRadius: 10, padding: 12, margin: 0, lineHeight: 1.6 } }, summaryText),
+    h(Card, { title: "โปสเตอร์สรุป — สำหรับแชร์ไลน์" },
+      h(SummaryPoster, { innerRef: posterRef, unitLabel, month, blocks, patientDays: s.patientDays, discharged: s.discharged }),
+      h("div", { className: "no-print", style: { display: "flex", gap: 8, marginTop: 10 } },
+        h("button", { onClick: exportImage, disabled: exporting, style: { ...btnStyle("primary"), opacity: exporting ? 0.7 : 1 } }, exporting ? "กำลังสร้างรูป..." : `${ICONS.download} บันทึกเป็นรูปภาพ`)
+      )
+    ),
+    h(Card, { title: "สรุปแบบอ่านง่าย (แยกบรรทัด)" },
+      h("pre", { style: { whiteSpace: "pre-wrap", fontFamily: "'Sarabun', sans-serif", fontSize: 12.5, background: T.bg, borderRadius: 10, padding: 12, margin: 0, lineHeight: 1.7 } }, summaryText),
       h("div", { className: "no-print", style: { display: "flex", gap: 8, marginTop: 10 } },
         h("button", { onClick: copy, style: btnStyle(copied ? "primary" : "ghost") }, `${copied ? ICONS.check : ICONS.copy} ${copied ? "คัดลอกแล้ว" : "คัดลอกข้อความ"}`),
-        h("button", { onClick: () => window.print(), style: btnStyle("primary") }, `${ICONS.download} ส่งออกเป็น PDF`)
+        h("button", { onClick: () => window.print(), style: btnStyle("ghost") }, `${ICONS.download} ส่งออกเป็น PDF`)
       )
     )
   );
@@ -516,7 +583,7 @@ function App() {
     const ventDays = deviceTotalDays(d.vent), ventCount = deviceTotalCount(d.vent);
     const cvcDays = deviceTotalDays(d.cvc), cvcCount = deviceTotalCount(d.cvc);
     const foleyDays = deviceTotalDays(d.foley), foleyCount = deviceTotalCount(d.foley);
-    const fluidDays = num(d.fluid.days), fluidCount = num(d.fluid.count);
+    const fluidDays = deviceTotalDays(d.fluid), fluidCount = deviceTotalCount(d.fluid);
     return { unit: u, month: m, patientDays: num(d.patientDays), discharged: num(d.discharged),
       vapCount, ventDays, ventCount, vapRate: rate(vapCount, ventDays),
       clabsiCount, cvcDays, cvcCount, clabsiRate: rate(clabsiCount, cvcDays),
@@ -535,7 +602,7 @@ function App() {
           `${icMode ? ICONS.logout : ICONS.lock} ${icMode ? "ทีม IC" : "เข้าสู่ระบบทีม IC"}`)
       ),
       h("div", { style: { display: "flex", gap: 6, marginTop: 14 } },
-        UNITS.map((u) => h("button", { key: u.key, onClick: () => setUnit(u.key), style: { flex: 1, padding: "8px 6px", borderRadius: 10, border: "none", cursor: "pointer", background: unit === u.key ? "#fff" : "rgba(255,255,255,0.18)", color: unit === u.key ? UNIT_COLORS[u.key].solid : "#fff", fontWeight: 700, fontSize: 12.5 } }, u.label))
+        UNITS.map((u) => h("button", { key: u.key, onClick: () => setUnit(u.key), style: { flex: 1, padding: "8px 4px", borderRadius: 10, border: "none", cursor: "pointer", background: unit === u.key ? "#fff" : "rgba(255,255,255,0.18)", color: unit === u.key ? UNIT_COLORS[u.key].solid : "#fff", fontWeight: 700, fontSize: 11.5 } }, u.label))
       )
     ),
     h("main", { style: { padding: 14, maxWidth: 640, margin: "0 auto" } },
